@@ -37,6 +37,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+
+	serving_v1alpha1_client "github.com/knative/serving/pkg/client/clientset/versioned/typed/serving/v1alpha1"
 )
 
 const (
@@ -71,6 +73,9 @@ type GatewayController struct {
 	kubeClientset    kubernetes.Interface
 	gatewayClientset clientset.Interface
 
+	// knative client
+	knClient *serving_v1alpha1_client.ServingV1alpha1Client
+
 	// gateway-controller informer and queue
 	podInformer informersv1.PodInformer
 	svcInformer informersv1.ServiceInformer
@@ -86,8 +91,9 @@ func NewGatewayController(rest *rest.Config, configMap, namespace string) *Gatew
 		Namespace:        namespace,
 		kubeConfig:       rest,
 		log:              common.NewArgoEventsLogger(),
-		kubeClientset:    kubernetes.NewForConfigOrDie(rest),
+		kubeClientset:    kubernetes.NewForConfigOrDie(rest),		
 		gatewayClientset: clientset.NewForConfigOrDie(rest),
+		knClient: serving_v1alpha1_client.NewForConfigOrDie(rest),
 		queue:            workqueue.NewRateLimitingQueue(rateLimiter),
 	}
 }
@@ -176,7 +182,7 @@ func (c *GatewayController) Run(ctx context.Context, gwThreads, eventThreads int
 		map[string]interface{}{
 			common.LabelInstanceID: c.Config.InstanceID,
 			common.LabelVersion:    base.GetVersion().Version,
-		}).Info("starting gateway-controller")
+		}).Info("starting gateway-controller with Knative sensor")
 	_, err := c.watchControllerConfigMap(ctx)
 	if err != nil {
 		c.log.WithError(err).Error("failed to register watch for gateway-controller config map")

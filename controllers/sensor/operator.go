@@ -27,6 +27,8 @@ import (
 	"github.com/argoproj/argo-events/pkg/apis/sensor/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	
+	serving_v1alpha1_api "knative.dev/serving/pkg/apis/serving/v1alpha1"
 )
 
 // the context of an operation on a sensor.
@@ -103,6 +105,7 @@ func (soc *sOperationCtx) operate() error {
 
 	switch soc.s.Status.Phase {
 	case v1alpha1.NodePhaseNew:
+		soc.log.Info("Got event for new sensor with optional Knative sensor support !!!")
 		err := soc.createSensorResources()
 		if err != nil {
 			return err
@@ -137,17 +140,32 @@ func (soc *sOperationCtx) createSensorResources() error {
 	}
 
 	soc.initializeAllNodes()
-	pod, err := soc.createSensorPod()
-	if err != nil {
-		err = errors.Wrap(err, "failed to create sensor pod")
-		soc.markSensorPhase(v1alpha1.NodePhaseError, false, err.Error())
-		return err
-	}
-	soc.markAllNodePhases()
-	soc.log.WithField(common.LabelPodName, pod.Name).Info("sensor pod is created")
 
-	// expose sensor if service is configured
-	if soc.srctx.getServiceTemplateSpec() != nil {
+	// Creating Pod only if sensor is not going to be serverless
+	if soc.srctx.s.Spec.KnativeService == nil {
+		pod, err := soc.createSensorPod()
+		if err != nil {
+			err = errors.Wrap(err, "failed to create sensor pod")
+			soc.markSensorPhase(v1alpha1.NodePhaseError, false, err.Error())
+			return err
+		}
+		soc.markAllNodePhases()
+		soc.log.WithField(common.LabelPodName, pod.Name).Info("sensor pod is created")
+	}
+
+	if soc.srctx.s.Spec.KnativeService != nil {
+		// expose sensor as knative service
+		soc.markAllNodePhases()
+		soc.log.Info("going to create knative sensor service")
+		svc, err := soc.createKnativeSensorService()
+		if err != nil {
+			err = errors.Wrap(err, "failed to create knative sensor service")
+			soc.markSensorPhase(v1alpha1.NodePhaseError, false, err.Error())
+			return err
+		}
+		soc.log.WithField(common.LabelServiceName, svc.Name).Info("sensor knative service is created")
+	} else if soc.srctx.getServiceTemplateSpec() != nil {
+		// expose sensor if service is configured
 		svc, err := soc.createSensorService()
 		if err != nil {
 			err = errors.Wrap(err, "failed to create sensor service")
@@ -175,6 +193,22 @@ func (soc *sOperationCtx) createSensorPod() (*corev1.Pod, error) {
 		return nil, err
 	}
 	return pod, nil
+}
+
+func (soc *sOperationCtx) createKnativeSensorService() (*serving_v1alpha1_api.Service, error) {
+	svc, err := soc.srctx.newKnativeSensorService()
+	if err != nil {
+			soc.log.WithError(err).Error("failed to initialize knative service for sensor")
+			return nil, err
+	}
+
+	svc, err = soc.srctx.createKnativeSensorService(svc)
+	if err != nil {
+			soc.log.WithError(err).Error("failed to create knative service for sensor")
+			return nil, err
+	}
+
+	return svc, nil
 }
 
 func (soc *sOperationCtx) createSensorService() (*corev1.Service, error) {
@@ -209,7 +243,13 @@ func (soc *sOperationCtx) updateSensorResources() error {
 		return err
 	}
 
-	_, svcChanged, err := soc.updateSensorService()
+	svcChanged := false
+	if soc.srctx.s.Spec.KnativeService != nil {
+		_, svcChanged, err = soc.updateKnativeSensorService()
+	} else{
+		_, svcChanged, err = soc.updateSensorService()
+	}
+
 	if err != nil {
 		err = errors.Wrap(err, "failed to update sensor service")
 		soc.markSensorPhase(v1alpha1.NodePhaseError, false, err.Error())
@@ -224,6 +264,11 @@ func (soc *sOperationCtx) updateSensorResources() error {
 }
 
 func (soc *sOperationCtx) updateSensorPod() (*corev1.Pod, bool, error) {
+	// Knative sensor service doesn't need pod update check
+	if soc.srctx.s.Spec.KnativeService != nil {
+		return nil, false, nil
+	}
+	
 	// Check if sensor spec has changed for pod.
 	existingPod, err := soc.srctx.getSensorPod()
 	if err != nil {
@@ -311,6 +356,59 @@ func (soc *sOperationCtx) updateSensorService() (*corev1.Service, bool, error) {
 
 	// change createSensorService to take a service spec
 	createdSvc, err := soc.srctx.createSensorService(newSvc)
+	if err != nil {
+		soc.log.WithField(common.LabelServiceName, newSvc.Name).WithError(err).Error("failed to create service for sensor")
+		return nil, false, err
+	}
+	soc.log.WithField(common.LabelServiceName, newSvc.Name).Info("sensor service is created")
+
+	return createdSvc, true, nil
+}
+
+func (soc *sOperationCtx) updateKnativeSensorService() (*serving_v1alpha1_api.Service, bool, error) {
+	// Check if sensor spec has changed for service.
+	soc.log.Info("Updating Knative sensor service")
+	existingSvc, err := soc.srctx.getKnativeSensorService()
+	if err != nil {
+		soc.log.WithError(err).Error("failed to get knative service for sensor")
+		return nil, false, err
+	}
+
+	// create a new service spec
+	newSvc, err := soc.srctx.newKnativeSensorService()
+	if err != nil {
+		soc.log.WithError(err).Error("failed to initialize service for sensor")
+		return nil, false, err
+	}
+
+	if existingSvc != nil {
+		// updated spec doesn't have service defined, delete existing service.
+		if newSvc == nil {
+			if err := soc.srctx.deleteKnativeSensorService(existingSvc); err != nil {
+				return nil, false, err
+			}
+			return nil, true, nil
+		}
+
+		// check if service spec remained unchanged
+		if existingSvc.Annotations[common.AnnotationSensorResourceSpecHashName] == newSvc.Annotations[common.AnnotationSensorResourceSpecHashName] {
+			soc.log.WithField(common.LabelServiceName, existingSvc.Name).Debug("sensor service spec unchanged")
+			return nil, false, nil
+		}
+
+		// service spec changed, delete existing service and create new one
+		soc.log.WithField(common.LabelServiceName, existingSvc.Name).Info("sensor service spec changed")
+
+		if err := soc.srctx.deleteKnativeSensorService(existingSvc); err != nil {
+			return nil, false, err
+		}
+	} else if newSvc == nil {
+		// sensor service doesn't exist originally
+		return nil, false, nil
+	}
+
+	// change createSensorService to take a service spec
+	createdSvc, err := soc.srctx.createKnativeSensorService(newSvc)
 	if err != nil {
 		soc.log.WithField(common.LabelServiceName, newSvc.Name).WithError(err).Error("failed to create service for sensor")
 		return nil, false, err

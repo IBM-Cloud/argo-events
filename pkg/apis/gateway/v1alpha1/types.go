@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	"github.com/argoproj/argo-events/pkg/apis/common"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"	
 )
 
 // Gateway version
@@ -85,6 +85,10 @@ type GatewaySpec struct {
 
 	// EventProtocol is the underlying protocol used to send events from gateway to watchers(components interested in listening to event from this gateway)
 	EventProtocol *common.EventProtocol `json:"eventProtocol" protobuf:"bytes,7,opt,name=eventProtocol"`
+
+	// KnativeService is the specifications of the Knative service to expose the gateway
+	// Refer https://knative.dev/v0.7-docs/reference/serving-api/#serving.knative.dev/v1alpha1.RevisionTemplateSpec
+	KnativeService *common.KnativeServiceTemplateSpec `json:"knativeservice,omitempty" protobuf:"bytes,8,opt,name=knativeservice"`
 }
 
 // GatewayStatus contains information about the status of a gateway.

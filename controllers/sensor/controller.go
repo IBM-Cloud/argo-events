@@ -39,6 +39,8 @@ import (
 	ccommon "github.com/argoproj/argo-events/controllers/common"
 	"github.com/argoproj/argo-events/pkg/apis/sensor/v1alpha1"
 	clientset "github.com/argoproj/argo-events/pkg/client/sensor/clientset/versioned"
+
+	serving_v1alpha1_client "github.com/knative/serving/pkg/client/clientset/versioned/typed/serving/v1alpha1"
 )
 
 // informer constants
@@ -75,6 +77,9 @@ type SensorController struct {
 	kubeClientset   kubernetes.Interface
 	sensorClientset clientset.Interface
 
+	// knative client
+	knClient *serving_v1alpha1_client.ServingV1alpha1Client
+
 	// sensor informer and queue
 	podInformer informersv1.PodInformer
 	svcInformer informersv1.ServiceInformer
@@ -89,7 +94,8 @@ func NewSensorController(rest *rest.Config, configMap, namespace string) *Sensor
 		ConfigMap:       configMap,
 		Namespace:       namespace,
 		kubeConfig:      rest,
-		kubeClientset:   kubernetes.NewForConfigOrDie(rest),
+		kubeClientset:   kubernetes.NewForConfigOrDie(rest),		
+		knClient: serving_v1alpha1_client.NewForConfigOrDie(rest),
 		sensorClientset: clientset.NewForConfigOrDie(rest),
 		queue:           workqueue.NewRateLimitingQueue(rateLimiter),
 		log:             common.NewArgoEventsLogger(),

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"fmt"
 	"github.com/argoproj/argo-events/common"
 	controllerscommon "github.com/argoproj/argo-events/controllers/common"
 	"github.com/argoproj/argo-events/pkg/apis/gateway/v1alpha1"
@@ -8,6 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+
+	serving_v1alpha1_api "knative.dev/serving/pkg/apis/serving/v1alpha1"
 )
 
 type gwResourceCtx struct {
@@ -48,9 +51,26 @@ func (grc *gwResourceCtx) createGatewayService(svc *corev1.Service) (*corev1.Ser
 	return grc.controller.kubeClientset.CoreV1().Services(grc.gw.Namespace).Create(svc)
 }
 
+// createGatewayService creates a given service
+func (grc *gwResourceCtx) createGatewayKnativeService(svc *serving_v1alpha1_api.Service) (*serving_v1alpha1_api.Service, error) {
+	_, err := grc.controller.knClient.Services(grc.gw.Namespace).Create(svc)
+	if err != nil {
+		return nil, err
+	}
+
+	return svc, nil
+}
+
 // deleteGatewayService deletes a given service
 func (grc *gwResourceCtx) deleteGatewayService(svc *corev1.Service) error {
 	return grc.controller.kubeClientset.CoreV1().Services(grc.gw.Namespace).Delete(svc.Name, &metav1.DeleteOptions{})
+}
+
+func (grc *gwResourceCtx) deleteKnativeGatewayService(svc *serving_v1alpha1_api.Service) error {
+	return grc.controller.knClient.Services(grc.gw.Namespace).Delete(
+		grc.gw.Name,
+		&metav1.DeleteOptions{},
+	)
 }
 
 // getGatewayService returns the service of gateway
@@ -69,9 +89,20 @@ func (grc *gwResourceCtx) getGatewayService() (*corev1.Service, error) {
 	return svcs[0], nil
 }
 
+// getGatewayService returns the service of gateway
+func (grc *gwResourceCtx) getKnativeGatewayService() (*serving_v1alpha1_api.Service, error) {
+	service, err := grc.controller.knClient.Services(grc.gw.Namespace).Get(grc.gw.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return service, nil
+}
+
 // newGatewayService returns a new service that exposes gateway.
 func (grc *gwResourceCtx) newGatewayService() (*corev1.Service, error) {
 	servicTemplateSpec := grc.gw.Spec.Service.DeepCopy()
+	
 	if servicTemplateSpec == nil {
 		return nil, nil
 	}
@@ -86,6 +117,34 @@ func (grc *gwResourceCtx) newGatewayService() (*corev1.Service, error) {
 		service.Name = common.DefaultServiceName(grc.gw.Name)
 	}
 	err := grc.SetObjectMeta(grc.gw, service)
+	return service, err
+}
+
+// newKnativeGatewayService returns a new Knative service that exposes gateway
+// TODO: similar to regular gateway use yaml to define this knative service instead of hardcoding
+func (grc *gwResourceCtx) newKnativeGatewayService() (*serving_v1alpha1_api.Service, error) {
+	fmt.Println(">>>> In newKnativeGatewayService!?!?!?")
+	knServiceTemplateSpec := grc.gw.Spec.KnativeService.DeepCopy()
+	if knServiceTemplateSpec == nil {
+		return nil, nil
+	}
+
+	service := &serving_v1alpha1_api.Service{
+		ObjectMeta: knServiceTemplateSpec.ObjectMeta,
+		Spec: serving_v1alpha1_api.ServiceSpec{
+			ConfigurationSpec: serving_v1alpha1_api.ConfigurationSpec{
+				Template: &knServiceTemplateSpec.Template,
+			},
+		},
+	}
+
+	err := grc.SetObjectMeta(grc.gw, service)
+	
+	if service.Name == "" {
+		service.Name = common.DefaultServiceName(grc.gw.Name)
+	}
+	
+	grc.setupContainersEnv(service.Spec.Template.Spec.Containers)
 	return service, err
 }
 
@@ -161,9 +220,50 @@ func (grc *gwResourceCtx) setupContainersForGatewayPod(pod *corev1.Pod) {
 			Name:  common.EnvVarGatewayServerPort,
 			Value: grc.gw.Spec.ProcessorPort,
 		},
+		{
+			Name:  common.EnvVarGatewayControllerName,
+			Value: common.LabelGatewayControllerName,
+		},
 	}
 	for i, container := range pod.Spec.Containers {
 		container.Env = append(container.Env, envVars...)
 		pod.Spec.Containers[i] = container
+	}
+}
+
+func (grc *gwResourceCtx) setupContainersEnv(containers []corev1.Container) {
+	// env variables
+	envVars := []corev1.EnvVar{
+		{
+			Name:  common.EnvVarGatewayNamespace,
+			Value: grc.gw.Namespace,
+		},
+		{
+			Name:  common.EnvVarGatewayEventSourceConfigMap,
+			Value: grc.gw.Spec.EventSource,
+		},
+		{
+			Name:  common.EnvVarGatewayName,
+			Value: grc.gw.Name,
+		},
+		{
+			Name:  common.EnvVarGatewayControllerInstanceID,
+			Value: grc.controller.Config.InstanceID,
+		},
+		{
+			Name:  common.EnvVarGatewayControllerName,
+			Value: common.LabelGatewayControllerName,
+		},
+		{
+			Name:  common.EnvVarGatewayServerPort,
+			Value: grc.gw.Spec.ProcessorPort,
+		},
+		{
+			Name:  common.EnvVarGatewayControllerName,
+			Value: common.LabelGatewayControllerName,
+		},
+	}
+	for i, _ := range containers {
+		containers[i].Env = append(containers[i].Env, envVars...)
 	}
 }

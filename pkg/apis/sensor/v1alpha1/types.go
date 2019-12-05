@@ -119,6 +119,10 @@ type SensorSpec struct {
 	// ErrorOnFailedRound if set to true, marks sensor state as `error` if the previous trigger round fails.
 	// Once sensor state is set to `error`, no further triggers will be processed.
 	ErrorOnFailedRound bool `json:"errorOnFailedRound,omitempty" protobuf:"bytes,7,opt,name=errorOnFailedRound"`
+
+	// KnativeService is the specifications of the Knative service to expose the gateway
+	// Refer https://knative.dev/v0.7-docs/reference/serving-api/#serving.knative.dev/v1alpha1.RevisionTemplateSpec
+	KnativeService *common.KnativeServiceTemplateSpec `json:"knativeservice,omitempty" protobuf:"bytes,8,opt,name=knativeservice"`
 }
 
 // EventDependency describes a dependency

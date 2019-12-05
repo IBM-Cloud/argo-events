@@ -170,3 +170,7 @@ const (
 	// by this library.
 	CloudEventsVersion = "0.1"
 )
+
+const (
+	EnvVarRoutingGateway = "ROUTING_GATEWAY"
+)

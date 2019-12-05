@@ -41,8 +41,13 @@ func DefaultServiceName(serviceName string) string {
 }
 
 // ServiceDNSName returns a formulated dns name for a service
-func ServiceDNSName(serviceName, namespace string) string {
-	return fmt.Sprintf("%s-svc.%s.svc.cluster.local", serviceName, namespace)
+func ServiceDNSName(serviceName string, namespace string, isKnative bool) string {	
+	if isKnative {
+		// in case of Knative we expect to have sensor knative service url provided under watchers:sensors:name
+		return serviceName
+	}else{
+		return fmt.Sprintf("%s-svc.%s.svc.cluster.local", serviceName, namespace)
+	}
 }
 
 // DefaultEventSourceName returns a formulated name for a gateway configuration

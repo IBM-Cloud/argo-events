@@ -27,6 +27,9 @@ import (
 	"github.com/argoproj/argo-events/pkg/apis/gateway/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	serving_v1alpha1_api "knative.dev/serving/pkg/apis/serving/v1alpha1"
+	"fmt"
 )
 
 // the context of an operation on a gateway-controller.
@@ -131,6 +134,7 @@ func (goc *gwOperationCtx) operate() error {
 }
 
 func (goc *gwOperationCtx) createGatewayResources() error {
+	fmt.Println("IN createGatewayResources <<<")
 	err := Validate(goc.gw)
 	if err != nil {
 		goc.log.WithError(err).Error("gateway validation failed")
@@ -142,23 +146,34 @@ func (goc *gwOperationCtx) createGatewayResources() error {
 	// 1) Gateway Server   - Listen events from event source and dispatches the event to gateway client
 	// 2) Gateway Client   - Listens for events from gateway server, convert them into cloudevents specification
 	//                          compliant events and dispatch them to watchers.
-	pod, err := goc.createGatewayPod()
-	if err != nil {
-		err = errors.Wrap(err, "failed to create gateway pod")
-		goc.markGatewayPhase(v1alpha1.NodePhaseError, err.Error())
-		return err
+	if goc.gw.Spec.KnativeService == nil {
+		pod, err := goc.createGatewayPod()
+		if err != nil {
+			err = errors.Wrap(err, "failed to create gateway pod")
+			goc.markGatewayPhase(v1alpha1.NodePhaseError, err.Error())
+			return err
+		}
+		goc.log.WithField(common.LabelPodName, pod.Name).Info("gateway pod is created")
 	}
-	goc.log.WithField(common.LabelPodName, pod.Name).Info("gateway pod is created")
 
 	// expose gateway if service is configured
-	if goc.gw.Spec.Service != nil {
-		svc, err := goc.createGatewayService()
+	if goc.gw.Spec.KnativeService != nil {
+		svcName, err := goc.createKnativeGatewayService()		
+		
+		if err != nil {
+			err = errors.Wrap(err, "failed to create Knative gateway service")
+			goc.markGatewayPhase(v1alpha1.NodePhaseError, err.Error())
+			return err
+		}
+		goc.log.WithField(common.LabelServiceName, svcName).Info("Knative gateway service is created")
+	} else if goc.gw.Spec.Service != nil {
+		svcName, err := goc.createGatewayService()
 		if err != nil {
 			err = errors.Wrap(err, "failed to create gateway service")
 			goc.markGatewayPhase(v1alpha1.NodePhaseError, err.Error())
 			return err
 		}
-		goc.log.WithField(common.LabelServiceName, svc.Name).Info("gateway service is created")
+		goc.log.WithField(common.LabelServiceName, svcName).Info("gateway service is created")
 	}
 
 	goc.log.Info("marking gateway as active")
@@ -180,18 +195,37 @@ func (goc *gwOperationCtx) createGatewayPod() (*corev1.Pod, error) {
 	return pod, nil
 }
 
-func (goc *gwOperationCtx) createGatewayService() (*corev1.Service, error) {
+
+func (goc *gwOperationCtx) createKnativeGatewayService() (string, error) {
+	svc, err := goc.gwrctx.newKnativeGatewayService()
+	if err != nil {
+		goc.log.WithError(err).Error("failed to initialize Knative service for gateway")
+		return "", err
+	}
+	
+	svc, err = goc.gwrctx.createGatewayKnativeService(svc)
+		
+	if err != nil {
+		goc.log.WithError(err).Error("failed to create service for gateway")
+		return "", err
+	}
+
+	return svc.Name, nil
+}
+
+func (goc *gwOperationCtx) createGatewayService() (string, error) {
 	svc, err := goc.gwrctx.newGatewayService()
 	if err != nil {
 		goc.log.WithError(err).Error("failed to initialize service for gateway")
-		return nil, err
+		return "", err
 	}
 	svc, err = goc.gwrctx.createGatewayService(svc)
 	if err != nil {
 		goc.log.WithError(err).Error("failed to create service for gateway")
-		return nil, err
+		return "", err
 	}
-	return svc, nil
+
+	return svc.Name, nil
 }
 
 func (goc *gwOperationCtx) updateGatewayResources() error {
@@ -205,14 +239,20 @@ func (goc *gwOperationCtx) updateGatewayResources() error {
 		return err
 	}
 
-	_, podChanged, err := goc.updateGatewayPod()
+    _, podChanged, err := goc.updateGatewayPod()
 	if err != nil {
 		err = errors.Wrap(err, "failed to update gateway pod")
 		goc.markGatewayPhase(v1alpha1.NodePhaseError, err.Error())
 		return err
 	}
 
-	_, svcChanged, err := goc.updateGatewayService()
+	svcChanged := false
+	if goc.gw.Spec.KnativeService != nil {
+		_, svcChanged, err = goc.updateKnativeGatewayService()
+	} else{
+		_, svcChanged, err = goc.updateGatewayService()
+	}
+
 	if err != nil {
 		err = errors.Wrap(err, "failed to update gateway service")
 		goc.markGatewayPhase(v1alpha1.NodePhaseError, err.Error())
@@ -227,6 +267,11 @@ func (goc *gwOperationCtx) updateGatewayResources() error {
 }
 
 func (goc *gwOperationCtx) updateGatewayPod() (*corev1.Pod, bool, error) {
+	// Knative gateway service doesn't need pod update check
+	if goc.gw.Spec.KnativeService != nil {
+		return nil, false, nil
+	}
+
 	// Check if gateway spec has changed for pod.
 	existingPod, err := goc.gwrctx.getGatewayPod()
 	if err != nil {
@@ -314,6 +359,59 @@ func (goc *gwOperationCtx) updateGatewayService() (*corev1.Service, bool, error)
 
 	// change createGatewayService to take a service spec
 	createdSvc, err := goc.gwrctx.createGatewayService(newSvc)
+	if err != nil {
+		goc.log.WithError(err).Error("failed to create service for gateway")
+		return nil, false, err
+	}
+	goc.log.WithField(common.LabelServiceName, createdSvc.Name).Info("gateway service is created")
+
+	return createdSvc, true, nil
+}
+
+func (goc *gwOperationCtx) updateKnativeGatewayService() (*serving_v1alpha1_api.Service, bool, error) {
+	// Check if gateway spec has changed for service.
+	goc.log.Info("Updating Knative gateway service")
+	existingSvc, err := goc.gwrctx.getKnativeGatewayService()
+	if err != nil {
+		goc.log.WithError(err).Error("failed to get knative service for sensor")
+		return nil, false, err
+	}
+
+	// create a new service spec
+	newSvc, err := goc.gwrctx.newKnativeGatewayService()
+	if err != nil {
+		goc.log.WithError(err).Error("failed to initialize service for gateway")
+		return nil, false, err
+	}
+
+	if existingSvc != nil {
+		// updated spec doesn't have service defined, delete existing service.
+		if newSvc == nil {
+			if err := goc.gwrctx.deleteKnativeGatewayService(existingSvc); err != nil {
+				return nil, false, err
+			}
+			return nil, true, nil
+		}
+
+		// check if service spec remained unchanged
+		if existingSvc.Annotations[common.AnnotationGatewayResourceSpecHashName] == newSvc.Annotations[common.AnnotationGatewayResourceSpecHashName] {
+			goc.log.WithField(common.LabelServiceName, existingSvc.Name).Debug("gateway service spec unchanged")
+			return nil, false, nil
+		}
+
+		// service spec changed, delete existing service and create new one
+		goc.log.WithField(common.LabelServiceName, existingSvc.Name).Info("gateway service spec changed")
+
+		if err := goc.gwrctx.deleteKnativeGatewayService(existingSvc); err != nil {
+			return nil, false, err
+		}
+	} else if newSvc == nil {
+		// gateway service doesn't exist originally
+		return nil, false, nil
+	}
+
+	// change createGatewayService to take a service spec
+	createdSvc, err := goc.gwrctx.createGatewayKnativeService(newSvc)
 	if err != nil {
 		goc.log.WithError(err).Error("failed to create service for gateway")
 		return nil, false, err

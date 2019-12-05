@@ -1,0 +1,40 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Gateway
+metadata:
+  name: knative-webhook-gateway
+  labels:
+    # gateway controller with instanceId "argo-events" will process this gateway
+    gateways.argoproj.io/gateway-controller-instanceid: argo-events
+    # gateway controller will use this label to match with it's own version
+    # do not remove
+    argo-events-gateway-version: v0.11
+spec:
+  type: "webhook"
+  eventSource: "knative-webhook-event-source"
+  processorPort: "9330"
+  eventProtocol:
+    type: "HTTP"
+    http:
+      port: "8080"
+  template:
+    metadata:
+      name: "knative-gateway-http"
+      labels:
+        gateway-name: "knative-gateway"
+    spec:
+      serviceAccountName: "argo-events-sa"
+  knativeservice:
+    metadata:
+      name: "knative-gateway"
+    template:
+      spec:
+        containers:
+        - image: "kpavel/knative-gateway:v0.11"
+          command: ["/bin/knative-gateway.sh"]
+          env:
+            - name: ROUTING_GATEWAY
+              value: 10.109.239.78
+  watchers:
+    sensors:
+      # In case of Knative sensor service should be specified full domain name consisting from <service-name>.<namespace>.<knative domain name>
+      - name: "knative-sensor.argo-events.example.com"

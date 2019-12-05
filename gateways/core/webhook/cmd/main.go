@@ -20,9 +20,11 @@ import (
 	"github.com/argoproj/argo-events/common"
 	"github.com/argoproj/argo-events/gateways"
 	"github.com/argoproj/argo-events/gateways/core/webhook"
+	"fmt"
 )
 
 func main() {
+	fmt.Println("Starting gateway server with optional Knative support")
 	gateways.StartGateway(&webhook.WebhookEventSourceExecutor{
 		Log: common.NewArgoEventsLogger(),
 	})

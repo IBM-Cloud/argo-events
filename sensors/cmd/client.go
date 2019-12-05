@@ -28,6 +28,7 @@ import (
 )
 
 func main() {
+	fmt.Println("sensor with Knative support is starting !!!")
 	kubeConfig, _ := os.LookupEnv(common.EnvVarKubeConfig)
 	restConfig, err := common.GetClientConfig(kubeConfig)
 	if err != nil {

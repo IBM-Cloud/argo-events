@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Sensor
 metadata:
-  name: webhook-sensor
+  name: knative-webhook-sensor
   labels:
     sensors.argoproj.io/sensor-controller-instanceid: argo-events
     # sensor controller will use this label to match with it's own version
@@ -9,18 +9,24 @@ metadata:
     argo-events-sensor-version: v0.11
 spec:
   template:
+    metadata:
+      hello: world
     spec:
-      containers:
-        - name: "sensor"
-          image: "kpavel/sensor:test"
-          imagePullPolicy: Always
       serviceAccountName: argo-events-sa
+  knativeservice:
+    metadata:
+      name: "knative-sensor"
+    template:
+      spec:
+        containers:
+        - image: "kpavel/sensor:v0.11"
+          name: "sensor"
   dependencies:
-    - name: "webhook-gateway:example"
+    - name: "knative-webhook-gateway:example"
   eventProtocol:
     type: "HTTP"
     http:
-      port: "9300"
+      port: "8080"
   triggers:
     - template:
         name: webhook-workflow-trigger
@@ -51,5 +57,5 @@ spec:
                   args: ["{{inputs.parameters.message}}"]
       resourceParameters:
         - src:
-            event: "webhook-gateway:example"
+            event: "knative-webhook-gateway:example"
           dest: spec.arguments.parameters.0.value

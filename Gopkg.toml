@@ -8,6 +8,16 @@ required = [
   "gopkg.in/src-d/go-git.v4"
 ]
 
+
+
+[[constraint]]
+  branch = "release-0.8"
+  name = "github.com/knative/serving"
+
+[[constraint]]
+  branch = "release-0.8"
+  name = "knative.dev/serving"
+
 [[override]]
   name = "k8s.io/kube-openapi"
   branch = "master"

@@ -19,6 +19,7 @@ package common
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	serving_v1alpha1_api "knative.dev/serving/pkg/apis/serving/v1alpha1"
 )
 
 // EventProtocolType is type of the event dispatch protocol. Used for dispatching events
@@ -160,4 +161,17 @@ type ServiceTemplateSpec struct {
 	// More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#spec-and-status
 	// +optional
 	Spec corev1.ServiceSpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
+}
+
+// KnativeServiceTemplateSpec is the template spec contains metadata and service spec.
+type KnativeServiceTemplateSpec struct {
+	// Standard object's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#metadata
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	// KnativeService is the specifications of the Knative service to expose the gateway
+	// Refer https://knative.dev/v0.7-docs/reference/serving-api/#serving.knative.dev/v1alpha1.RevisionTemplateSpec
+	// +optional
+	Template serving_v1alpha1_api.RevisionTemplateSpec `json:"template,omitempty" protobuf:"bytes,3,opt,name=template"`
 }

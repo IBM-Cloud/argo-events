@@ -17,6 +17,7 @@ limitations under the License.
 package gateways
 
 import (
+	"os"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -107,7 +108,7 @@ func (gc *GatewayConfig) dispatchEventOverHttp(source string, eventPayload []byt
 		if sensor.Namespace != "" {
 			namespace = sensor.Namespace
 		}
-		if err := gc.postCloudEventToWatcher(common.ServiceDNSName(sensor.Name, namespace), gc.gw.Spec.EventProtocol.Http.Port, common.SensorServiceEndpoint, eventPayload); err != nil {
+		if err := gc.postCloudEventToWatcher(common.ServiceDNSName(sensor.Name, namespace, gc.gw.Spec.KnativeService != nil), gc.gw.Spec.EventProtocol.Http.Port, common.SensorServiceEndpoint, eventPayload); err != nil {
 			gc.Log.WithField(common.LabelSensorName, sensor.Name).WithError(err).Warn("failed to dispatch event to sensor watcher over http. communication error")
 			completeSuccess = false
 		}
@@ -117,7 +118,7 @@ func (gc *GatewayConfig) dispatchEventOverHttp(source string, eventPayload []byt
 		if gateway.Namespace != "" {
 			namespace = gateway.Namespace
 		}
-		if err := gc.postCloudEventToWatcher(common.ServiceDNSName(gateway.Name, namespace), gateway.Port, gateway.Endpoint, eventPayload); err != nil {
+		if err := gc.postCloudEventToWatcher(common.ServiceDNSName(gateway.Name, namespace, gc.gw.Spec.KnativeService != nil), gateway.Port, gateway.Endpoint, eventPayload); err != nil {
 			gc.Log.WithField(common.LabelGatewayName, gateway.Name).WithError(err).Warn("failed to dispatch event to gateway watcher over http. communication error")
 			completeSuccess = false
 		}
@@ -154,10 +155,33 @@ func (gc *GatewayConfig) dispatchEventOverNats(source string, eventPayload []byt
 
 // postCloudEventToWatcher makes a HTTP POST call to watcher's service
 func (gc *GatewayConfig) postCloudEventToWatcher(host string, port string, endpoint string, payload []byte) error {
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s:%s%s", host, port, endpoint), bytes.NewBuffer(payload))
-	if err != nil {
-		return err
+	var req *http.Request
+	var err error
+
+	if gc.gw.Spec.KnativeService != nil {
+		gc.Log.Info("sending event to sensor with Knative support !!!")
+
+		istioGw, ok := os.LookupEnv(common.EnvVarRoutingGateway)
+		if !ok {
+			panic(fmt.Sprintf("%s environment variable not set", common.EnvVarRoutingGateway))
+		}
+		
+		fmt.Println("ISTIO_GATEWAY:", istioGw)
+		
+		req, err = http.NewRequest("POST", fmt.Sprintf("http://%s", istioGw), bytes.NewBuffer(payload))
+		if err != nil {
+			return err
+		}
+		
+		req.Host = host
+		fmt.Println("Dispathing to Knative host:", req.Host)
+	} else {
+		req, err = http.NewRequest("POST", fmt.Sprintf("http://%s:%s%s", host, port, endpoint), bytes.NewBuffer(payload))
+		if err != nil {
+		    return err
+		}
 	}
+	
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{

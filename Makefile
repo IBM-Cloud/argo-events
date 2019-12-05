@@ -16,7 +16,8 @@ override LDFLAGS += \
 
 #  docker image publishing options
 DOCKER_PUSH?=true
-IMAGE_NAMESPACE?=argoproj
+
+IMAGE_NAMESPACE?=kpavel
 IMAGE_TAG?=v0.11
 
 ifeq (${DOCKER_PUSH},true)
@@ -102,6 +103,18 @@ webhook-image: webhook-linux
 	docker build -t $(IMAGE_PREFIX)webhook-gateway:$(IMAGE_TAG) -f ./gateways/core/webhook/Dockerfile .
 	@if [ "$(DOCKER_PUSH)" = "true" ] ; then  docker push $(IMAGE_PREFIX)webhook-gateway:$(IMAGE_TAG) ; fi
 
+# knative gateway
+knative-gateway:
+	go build -v -ldflags '${LDFLAGS}' -o ${DIST_DIR}/gateway-client ./gateways/cmd/main.go
+	go build -v -ldflags '${LDFLAGS}' -o ${DIST_DIR}/webhook-gateway ./gateways/core/webhook/cmd/
+
+knative-gateway-linux:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make gateway-client
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make webhook
+
+knative-gateway-image: knative-gateway-linux
+	docker build -t $(IMAGE_PREFIX)knative-gateway:$(IMAGE_TAG) -f ./gateways/Dockerfile.knative .
+	@if [ "$(DOCKER_PUSH)" = "true" ] ; then  docker push $(IMAGE_PREFIX)knative-gateway:$(IMAGE_TAG) ; fi
 
 calendar:
 	go build -v -ldflags '${LDFLAGS}' -o ${DIST_DIR}/calendar-gateway ./gateways/core/calendar/cmd/

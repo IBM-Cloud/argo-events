@@ -187,6 +187,9 @@ statusNodes:
 // WatchEventsFromGateways watches and handles events received from the gateway.
 func (sec *sensorExecutionCtx) WatchEventsFromGateways() {
 	// start processing the update notification queue
+
+	sec.log.Info("In WatchEventsFromGateways")
+
 	go func() {
 		for e := range sec.queue {
 			sec.processUpdateNotification(e)
@@ -219,6 +222,7 @@ func (sec *sensorExecutionCtx) WatchEventsFromGateways() {
 
 // validateEvent validates whether the event is indeed from gateway that this sensor is watching
 func (sec *sensorExecutionCtx) validateEvent(events *apicommon.Event) (*ss_v1alpha1.EventDependency, bool) {
+	fmt.Println("In validateEvent", events)
 	for _, dependency := range sec.sensor.Spec.Dependencies {
 		g, err := glob.Compile(dependency.Name)
 		if err != nil {
@@ -234,6 +238,7 @@ func (sec *sensorExecutionCtx) validateEvent(events *apicommon.Event) (*ss_v1alp
 
 func (sec *sensorExecutionCtx) parseEvent(payload []byte) (*apicommon.Event, error) {
 	var event *apicommon.Event
+	fmt.Println("In parseEvent", payload)
 	if err := json.Unmarshal(payload, &event); err != nil {
 		response := "failed to parse event received from gateway"
 		sec.log.WithError(err).Error(response)

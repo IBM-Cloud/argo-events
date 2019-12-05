@@ -1,0 +1,9 @@
+FROM centos:7
+
+COPY dist/gateway-client /bin/
+
+COPY dist/webhook-gateway /bin/
+
+COPY hack/knative-gateway.sh /bin/ 
+
+CMD ./knative-gateway.sh
